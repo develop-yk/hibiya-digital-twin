@@ -162,6 +162,16 @@
     </div>
 
     <div class="sec">
+      <h2>表示モード</h2>
+      <div class="row">
+        <button class="chip on" id="dmStandard">標準</button>
+        <button class="chip" id="dmWire">ワイヤーフレーム</button>
+      </div>
+      <label class="sl" id="edgeRow" style="display:none">線の強さ <b id="edgeVal">標準</b></label>
+      <input type="range" id="edge" min="1" max="20" step="1" value="4" style="display:none">
+    </div>
+
+    <div class="sec" id="colorSec">
       <h2>建築物の色分け</h2>
       <div class="row" id="colorModes"></div>
       <div class="legend" id="legend"></div>
@@ -193,10 +203,6 @@
         <button class="chip on" id="terrainOn">地形あり</button>
         <button class="chip" id="terrainOff">平面</button>
       </div>
-      <label class="sl">高さ強調 <b id="exagVal">1.0×</b></label>
-      <input type="range" id="exag" min="1" max="8" step="0.5" value="1">
-      <label class="sl">ジオイド補正 <b id="geoidVal">36.6 m</b></label>
-      <input type="range" id="geoid" min="0" max="45" step="0.1" value="36.6">
     </div>
 
     <div class="sec">
@@ -205,15 +211,20 @@
     </div>
 
     <div class="sec">
-      <h2>描画品質</h2>
-      <label class="sl">タイル解像度 <b id="sseVal">標準</b></label>
-      <input type="range" id="sse" min="4" max="40" step="2" value="16">
-      <div class="status" style="margin-top:7px" id="tileStat"></div>
-    </div>
-
-    <div class="sec">
       <h2>ステータス</h2>
       <div class="status" id="status"></div>
+    </div>
+
+    <!-- 画面には出さない設定。既定値のまま内部で使う。
+         必要になったら hidden を外せばそのままUIとして復活する。 -->
+    <div hidden>
+      <b id="exagVal"></b>
+      <input type="range" id="exag" min="1" max="8" step="0.5" value="1">
+      <b id="geoidVal"></b>
+      <input type="range" id="geoid" min="0" max="45" step="0.1" value="36.6">
+      <b id="sseVal"></b>
+      <input type="range" id="sse" min="4" max="40" step="2" value="16">
+      <div id="tileStat"></div>
     </div>
 
   </div>
@@ -494,9 +505,12 @@ function createGsiTerrainProvider(Cesium){
 // 必ず `var` で宣言すること。
 var Cesium;
 let viewer, terrainProvider, imageryLayer = null;
+let currentImagery = "photo", prevImagery = "photo";
 let CATALOG = null;
 const LAYERS = new Map();            // id -> {def, tilesets:[], on, loading, failed, el}
 let colorMode = "texture";
+let displayMode = "standard";      // "standard" | "wire"
+let edgeStage = null;              // ワイヤーフレーム用のエッジ検出ステージ
 let opacity = 1.0;
 let selected = null;                 // {feature, originalColor}
 let showAllProps = false;
@@ -703,6 +717,7 @@ async function toggleLayer(id, force){
         dynamicScreenSpaceError: true,
         preloadWhenHidden: false,
         skipLevelOfDetail: false,
+        enableDebugWireframe: true,   // エッジ検出が使えない環境の代替表示用
         shadows: (L.def.category === "risk")
           ? Cesium.ShadowMode.DISABLED : Cesium.ShadowMode.ENABLED
       });
@@ -790,6 +805,10 @@ function buildingStyle(){
   const a = opacity.toFixed(3);
   const withAlpha = (hex) => "color('" + hex + "', " + a + ")";
 
+  // ワイヤーフレーム時は面をほぼ黒く塗り潰し、輪郭線だけを浮かせる
+  if (displayMode === "wire") return new Cesium.Cesium3DTileStyle({
+    color: "color('" + WIRE.fill + "', " + a + ")" });
+
   if (colorMode === "texture") return new Cesium.Cesium3DTileStyle({
     color: "color('#ffffff', " + a + ")" });
   if (colorMode === "mono") return new Cesium.Cesium3DTileStyle({
@@ -823,7 +842,11 @@ function buildingStyle(){
 function applyStyleTo(L){
   for (const ts of L.tilesets){
     try{
-      if (L.def.category === "building"){
+      if (displayMode === "wire" && L.def.category !== "building"){
+        // 道路・区画・植生も面を沈めて輪郭線だけ見せる
+        ts.style = new Cesium.Cesium3DTileStyle({
+          color: "color('" + WIRE.areaFill + "', 0.9)" });
+      } else if (L.def.category === "building"){
         ts.style = buildingStyle();
       } else if (L.def.styleBy){
         // 属性値ごとに色を変えるレイヤー（用途地域など）
@@ -969,6 +992,86 @@ function esc(s){
   return String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 }
 
+/* ------------------------------------------------------- 表示モード（意匠） */
+/* 添付されたトーンに合わせた設計図ふうの見え方。
+   面をほぼ黒で塗り、Cesium のエッジ検出ポストプロセスで輪郭線だけを光らせる。
+   三角形のワイヤーフレーム（debugWireframe）と違い、面の対角線が出ないので
+   建物が箱の稜線として読める。 */
+const WIRE = {
+  fill:      "#0b1119",   // 面の色（ほぼ黒）
+  edge:      "#cfe4ff",   // 輪郭線の色
+  ground:    "#05080c",   // 地球の地色
+  areaFill:  "#0d141d"    // 道路・区画などの面
+};
+
+function setDisplayMode(mode){
+  displayMode = mode;
+  $("#dmStandard").classList.toggle("on", mode === "standard");
+  $("#dmWire").classList.toggle("on", mode === "wire");
+  const wire = mode === "wire";
+  $("#edgeRow").style.display = wire ? "flex" : "none";
+  $("#edge").style.display    = wire ? "block" : "none";
+  $("#colorSec").style.opacity = wire ? 0.4 : 1;
+  $("#colorSec").style.pointerEvents = wire ? "none" : "auto";
+
+  const scene = viewer.scene;
+  if (wire){
+    prevImagery = currentImagery;
+    setImagery("none");
+    scene.globe.baseColor = Cesium.Color.fromCssColorString(WIRE.ground);
+    scene.skyAtmosphere.show = false;
+    scene.fog.enabled = false;
+    scene.globe.enableLighting = false;
+    scene.backgroundColor = Cesium.Color.fromCssColorString(WIRE.ground);
+    if (!edgeStage) edgeStage = createEdgeStage();
+    applyEdgeStrength(+$("#edge").value);
+    setStatus("mode", "ok", "表示：ワイヤーフレーム");
+  }else{
+    removeEdgeStage();
+    scene.globe.baseColor = Cesium.Color.fromCssColorString("#0e141b");
+    scene.skyAtmosphere.show = true;
+    scene.fog.enabled = true;
+    scene.backgroundColor = Cesium.Color.fromCssColorString("#000000");
+    setImagery(prevImagery || "photo");
+    setStatus("mode", "idle", "表示：標準");
+  }
+  for (const L of LAYERS.values()) if (L.tilesets.length) applyStyleTo(L);
+}
+
+function createEdgeStage(){
+  try{
+    const edge = Cesium.PostProcessStageLibrary.createEdgeDetectionStage();
+    edge.uniforms.color = Cesium.Color.fromCssColorString(WIRE.edge);
+    edge.uniforms.length = 0.06;
+    const stage = Cesium.PostProcessStageLibrary.createSilhouetteStage([edge]);
+    viewer.scene.postProcessStages.add(stage);
+    return { edge, stage };
+  }catch(e){
+    console.warn("エッジ検出を使えません:", e);
+    // 代替：三角形ワイヤーフレーム（対角線は出るが輪郭は分かる）
+    for (const L of LAYERS.values())
+      for (const ts of L.tilesets) { try{ ts.debugWireframe = true; }catch(_e){} }
+    setStatus("mode", "warn", "表示：ワイヤーフレーム（簡易）");
+    return null;
+  }
+}
+
+function removeEdgeStage(){
+  if (edgeStage){
+    try{ viewer.scene.postProcessStages.remove(edgeStage.stage); }catch(_e){}
+    edgeStage = null;
+  }
+  for (const L of LAYERS.values())
+    for (const ts of L.tilesets) { try{ ts.debugWireframe = false; }catch(_e){} }
+}
+
+function applyEdgeStrength(v){
+  // v: 1（細い）〜 20（太い）。Cesium の edge detection は
+  // uniforms.length が大きいほど線が太く・拾う輪郭が増える。
+  $("#edgeVal").textContent = v <= 4 ? "細め" : (v <= 10 ? "標準" : "強め");
+  if (edgeStage) edgeStage.edge.uniforms.length = 0.004 + v * 0.004;
+}
+
 /* ---------------------------------------------------------------- 日照/影 */
 function todayLocal(){
   const n = new Date();
@@ -995,6 +1098,7 @@ function setShadows(on){
 
 /* -------------------------------------------------------------- 表示切替 */
 function setImagery(kind){
+  currentImagery = kind;
   document.querySelectorAll("[data-img]").forEach(b => b.classList.toggle("on", b.dataset.img === kind));
   if (imageryLayer){ viewer.imageryLayers.remove(imageryLayer, true); imageryLayer = null; }
   if (kind === "none"){ setStatus("imagery", "idle", "背景：なし"); return; }
@@ -1045,6 +1149,10 @@ function buildStaticUI(){
   document.querySelectorAll("[data-img]").forEach(b => {
     b.onclick = () => ready() && setImagery(b.dataset.img);
   });
+  $("#dmStandard").onclick = () => ready() && setDisplayMode("standard");
+  $("#dmWire").onclick     = () => ready() && setDisplayMode("wire");
+  $("#edge").oninput = (e) => ready() && applyEdgeStrength(+e.target.value);
+
   $("#terrainOn").onclick  = () => ready() && setTerrain(true);
   $("#terrainOff").onclick = () => ready() && setTerrain(false);
   $("#shadowOn").onclick   = () => ready() && setShadows(true);
