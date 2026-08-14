@@ -75,6 +75,8 @@
     margin:10px 0 3px}
   label.sl b{color:var(--fg);font-weight:600}
   input[type=range]{width:100%;accent-color:var(--accent);height:18px}
+  input[type=color]{width:38px;height:20px;padding:0;border:1px solid var(--line);
+    border-radius:5px;background:none;cursor:pointer;flex:0 0 auto}
   input[type=date],input[type=time]{width:100%;background:var(--panel2);color:var(--fg);
     border:1px solid var(--line);border-radius:7px;padding:5px 8px;font-size:11px;
     font-family:inherit;color-scheme:dark}
@@ -167,8 +169,18 @@
         <button class="chip on" id="dmStandard">標準</button>
         <button class="chip" id="dmWire">ワイヤーフレーム</button>
       </div>
-      <label class="sl" id="edgeRow" style="display:none">線の強さ <b id="edgeVal">標準</b></label>
-      <input type="range" id="edge" min="1" max="20" step="1" value="4" style="display:none">
+      <div id="wireOpts" style="display:none">
+        <label class="sl">線の色 <input type="color" id="wEdge" value="#cfe4ff"></label>
+        <label class="sl">面の色 <input type="color" id="wFill" value="#0b1119"></label>
+        <label class="sl">背景の色 <input type="color" id="wBg" value="#05080c"></label>
+        <label class="sl">線の太さ <b id="wWidthVal">1.0 px</b></label>
+        <input type="range" id="wWidth" min="0.4" max="3" step="0.1" value="1">
+        <label class="sl">線の強さ <b id="edgeVal">繊細</b></label>
+        <input type="range" id="edge" min="1" max="20" step="1" value="4">
+        <label class="sl">遠景の減衰 <b id="wFadeVal">4.2 km</b></label>
+        <input type="range" id="wFade" min="1" max="20" step="0.5" value="4.2">
+        <button class="chip" id="wReset" style="margin-top:9px;width:100%">既定に戻す</button>
+      </div>
     </div>
 
     <div class="sec" id="colorSec">
@@ -840,14 +852,19 @@ function buildingStyle(){
 }
 
 function applyStyleTo(L){
+  const cat = L.def.category;
+  const wire = displayMode === "wire";
   for (const ts of L.tilesets){
     try{
-      if (displayMode === "wire" && L.def.category !== "building"){
-        // 道路・区画・植生も面を沈めて輪郭線だけ見せる
-        ts.style = new Cesium.Cesium3DTileStyle({
-          color: "color('" + WIRE.areaFill + "', 0.9)" });
-      } else if (L.def.category === "building"){
+      // 地面に貼りつく面の持ち上げ量（ワイヤーフレーム時のみ）
+      raiseTileset(ts, wire && cat !== "building" ? (WIRE_RAISE[cat] || 0) : 0);
+
+      if (cat === "building"){
         ts.style = buildingStyle();
+      } else if (wire){
+        // 道路・区画・植生も面を沈めるが、地面と分離できる程度に明るくする
+        ts.style = new Cesium.Cesium3DTileStyle({
+          color: "color('" + areaFillColor(cat) + "', 0.92)" });
       } else if (L.def.styleBy){
         // 属性値ごとに色を変えるレイヤー（用途地域など）
         const sb = L.def.styleBy;
@@ -863,7 +880,7 @@ function applyStyleTo(L){
         ts.style = new Cesium.Cesium3DTileStyle({
           color: "color('" + L.def.color + "', " + L.def.tint + ")" });
       } else {
-        // 道路・植生・都市設備は元のマテリアルをそのまま活かす
+        // 植生・都市設備は元のマテリアルをそのまま活かす
         ts.style = undefined;
       }
     }catch(e){ console.warn("style error", L.def.id, e); }
@@ -997,20 +1014,49 @@ function esc(s){
    面をほぼ黒で塗り、Cesium のエッジ検出ポストプロセスで輪郭線だけを光らせる。
    三角形のワイヤーフレーム（debugWireframe）と違い、面の対角線が出ないので
    建物が箱の稜線として読める。 */
-const WIRE = {
-  fill:      "#0b1119",   // 面の色（ほぼ黒）
-  edge:      "#cfe4ff",   // 輪郭線の色
-  ground:    "#05080c",   // 地球の地色
-  areaFill:  "#0d141d"    // 道路・区画などの面
+const WIRE_DEFAULT = {
+  fill:   "#0b1119",   // 建物の面（ほぼ黒）
+  edge:   "#cfe4ff",   // 輪郭線
+  ground: "#05080c",   // 背景・地球の地色
+  width:  1.0,         // 線の太さ（テクセル）
+  edgeV:  4,           // 線の強さ（1〜20）
+  fadeKm: 4.2          // この距離で線が消える
 };
+const WIRE = Object.assign({}, WIRE_DEFAULT);
+
+/* 面の明るさ。道路は帯として読ませたいので建物より持ち上げる */
+const WIRE_LIFT = { infra: 0.22, other: 0.12, nature: 0.10 };
+
+function areaFillColor(cat){
+  try{
+    const c = Cesium.Color.fromCssColorString(WIRE.fill);
+    const t = WIRE_LIFT[cat] != null ? WIRE_LIFT[cat] : 0.08;
+    return Cesium.Color.lerp(c, Cesium.Color.WHITE, t, new Cesium.Color()).toCssHexString();
+  }catch(_e){ return WIRE.fill; }
+}
+
+/* ワイヤーフレーム時、地面に貼りついた面を少し浮かせる。
+   エッジ検出は深度差で輪郭を拾うため、地形との段差が数十cmしかない
+   道路や区画は輪郭が出ない。数m持ち上げると帯として読めるようになる。 */
+const WIRE_RAISE = { infra: 2.5, other: 4.0, nature: 0.0 };
+
+function raiseTileset(ts, dz){
+  try{
+    if (!dz){ ts.modelMatrix = Cesium.Matrix4.IDENTITY; return; }
+    const c = Cesium.Cartographic.fromCartesian(ts.boundingSphere.center);
+    const a = Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, 0.0);
+    const b = Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, dz);
+    ts.modelMatrix = Cesium.Matrix4.fromTranslation(
+      Cesium.Cartesian3.subtract(b, a, new Cesium.Cartesian3()));
+  }catch(_e){}
+}
 
 function setDisplayMode(mode){
   displayMode = mode;
   $("#dmStandard").classList.toggle("on", mode === "standard");
   $("#dmWire").classList.toggle("on", mode === "wire");
   const wire = mode === "wire";
-  $("#edgeRow").style.display = wire ? "flex" : "none";
-  $("#edge").style.display    = wire ? "block" : "none";
+  $("#wireOpts").style.display = wire ? "block" : "none";
   $("#colorSec").style.opacity = wire ? 0.4 : 1;
   $("#colorSec").style.pointerEvents = wire ? "none" : "auto";
 
@@ -1018,12 +1064,11 @@ function setDisplayMode(mode){
   if (wire){
     prevImagery = currentImagery;
     setImagery("none");
-    scene.globe.baseColor = Cesium.Color.fromCssColorString(WIRE.ground);
     scene.skyAtmosphere.show = false;
     scene.fog.enabled = false;
     scene.globe.enableLighting = false;
-    scene.backgroundColor = Cesium.Color.fromCssColorString(WIRE.ground);
     if (!edgeStage) edgeStage = createEdgeStage();
+    applyWireColors();
     applyEdgeStrength(+$("#edge").value);
     setStatus("mode", "ok", "表示：ワイヤーフレーム");
   }else{
@@ -1038,17 +1083,88 @@ function setDisplayMode(mode){
   for (const L of LAYERS.values()) if (L.tilesets.length) applyStyleTo(L);
 }
 
+/* 深度バッファから輪郭を拾う自前のポストプロセス。
+   Cesium 標準の createEdgeDetectionStage は色と太さしか触れず、
+   遠景も近景も同じ強さで光るため線が団子になる。ここでは
+     ・1テクセル幅で拾って髪の毛のような細さにする
+     ・深度差を「その地点の距離」で正規化し、遠くの建物だけ線が
+       太く出てしまうのを防ぐ
+     ・距離に応じて減衰させ、奥に行くほど淡くする（空気遠近）
+   の3点で繊細さを出している。 */
+const EDGE_FS = `
+uniform sampler2D colorTexture;
+uniform sampler2D depthTexture;
+uniform vec3  u_color;
+uniform float u_width;      // サンプル間隔（テクセル）
+uniform float u_strength;   // 線の濃さ
+uniform float u_threshold;  // 拾い始める深度差
+uniform float u_fadeNear;   // これより近い線は最も濃い（m）
+uniform float u_fadeFar;    // これより遠い線は消える（m）
+in vec2 v_textureCoordinates;
+
+float eyeDepth(vec2 uv){
+  float d = czm_readDepth(depthTexture, uv);
+  vec2 xy = uv * czm_viewport.zw + czm_viewport.xy;
+  vec4 posEC = czm_windowToEyeCoordinates(vec4(xy, d, 1.0));
+  return -posEC.z / posEC.w;
+}
+
+void main(void){
+  vec4 scene = texture(colorTexture, v_textureCoordinates);
+  vec2 texel = u_width / czm_viewport.zw;
+
+  float c = eyeDepth(v_textureCoordinates);
+  if (c <= 0.0 || c > 1.0e7){ out_FragColor = scene; return; }
+
+  float l = eyeDepth(v_textureCoordinates - vec2(texel.x, 0.0));
+  float r = eyeDepth(v_textureCoordinates + vec2(texel.x, 0.0));
+  float t = eyeDepth(v_textureCoordinates + vec2(0.0, texel.y));
+  float b = eyeDepth(v_textureCoordinates - vec2(0.0, texel.y));
+
+  // 深度差を距離で正規化する（遠いほど 1px あたりの実距離が大きいため）
+  float lap = abs(4.0 * c - (l + r + t + b)) / max(c, 1.0);
+  float edge = smoothstep(u_threshold, u_threshold * 6.0, lap);
+
+  // 空気遠近：奥ほど淡く
+  float fade = 1.0 - smoothstep(u_fadeNear, u_fadeFar, c);
+  edge *= fade;
+
+  // 加算合成。面はほぼ黒なので線だけが浮かぶ
+  out_FragColor = vec4(scene.rgb + u_color * edge * u_strength, scene.a);
+}
+`;
+
 function createEdgeStage(){
+  try{
+    const stage = new Cesium.PostProcessStage({
+      name: "hibiya_edge",
+      fragmentShader: EDGE_FS,
+      uniforms: {
+        u_color:     () => Cesium.Color.fromCssColorString(WIRE.edge),
+        u_width:     1.0,
+        u_strength:  0.85,
+        u_threshold: 0.0016,
+        u_fadeNear:  350.0,
+        u_fadeFar:   4200.0
+      }
+    });
+    viewer.scene.postProcessStages.add(stage);
+    // 1フレーム描画してシェーダのコンパイル可否を確かめる
+    viewer.scene.render();
+    return { stage, custom: true };
+  }catch(e){
+    console.warn("自前のエッジ検出を使えません。標準版に切り替えます:", e);
+  }
   try{
     const edge = Cesium.PostProcessStageLibrary.createEdgeDetectionStage();
     edge.uniforms.color = Cesium.Color.fromCssColorString(WIRE.edge);
-    edge.uniforms.length = 0.06;
+    edge.uniforms.length = 0.02;
     const stage = Cesium.PostProcessStageLibrary.createSilhouetteStage([edge]);
     viewer.scene.postProcessStages.add(stage);
-    return { edge, stage };
-  }catch(e){
-    console.warn("エッジ検出を使えません:", e);
-    // 代替：三角形ワイヤーフレーム（対角線は出るが輪郭は分かる）
+    setStatus("mode", "warn", "表示：ワイヤーフレーム（標準エッジ）");
+    return { stage, edge, custom: false };
+  }catch(e2){
+    console.warn("エッジ検出を使えません:", e2);
     for (const L of LAYERS.values())
       for (const ts of L.tilesets) { try{ ts.debugWireframe = true; }catch(_e){} }
     setStatus("mode", "warn", "表示：ワイヤーフレーム（簡易）");
@@ -1065,11 +1181,63 @@ function removeEdgeStage(){
     for (const ts of L.tilesets) { try{ ts.debugWireframe = false; }catch(_e){} }
 }
 
+/* 色（線・面・背景）をシーンへ反映する */
+function applyWireColors(){
+  if (displayMode !== "wire") return;
+  const scene = viewer.scene;
+  scene.globe.baseColor = Cesium.Color.fromCssColorString(WIRE.ground);
+  scene.backgroundColor = Cesium.Color.fromCssColorString(WIRE.ground);
+  if (edgeStage && edgeStage.custom)
+    edgeStage.stage.uniforms.u_color = Cesium.Color.fromCssColorString(WIRE.edge);
+  else if (edgeStage && edgeStage.edge)
+    edgeStage.edge.uniforms.color = Cesium.Color.fromCssColorString(WIRE.edge);
+  for (const L of LAYERS.values()) if (L.tilesets.length) applyStyleTo(L);
+}
+
+/* 線の太さ（テクセル）。1.0 で1画素幅の髪の毛のような線になる */
+function applyEdgeWidth(px){
+  WIRE.width = px;
+  $("#wWidthVal").textContent = px.toFixed(1) + " px";
+  if (edgeStage && edgeStage.custom) edgeStage.stage.uniforms.u_width = px;
+}
+
+/* 遠景の減衰距離[km]。小さくすると近くの線だけが残り、より静かな絵になる */
+function applyEdgeFade(km){
+  WIRE.fadeKm = km;
+  $("#wFadeVal").textContent = km.toFixed(1) + " km";
+  if (edgeStage && edgeStage.custom){
+    const u = edgeStage.stage.uniforms;
+    u.u_fadeFar  = km * 1000.0;
+    u.u_fadeNear = km * 1000.0 * 0.08;
+  }
+}
+
 function applyEdgeStrength(v){
-  // v: 1（細い）〜 20（太い）。Cesium の edge detection は
-  // uniforms.length が大きいほど線が太く・拾う輪郭が増える。
-  $("#edgeVal").textContent = v <= 4 ? "細め" : (v <= 10 ? "標準" : "強め");
-  if (edgeStage) edgeStage.edge.uniforms.length = 0.004 + v * 0.004;
+  // v: 1（最も繊細）〜 20（くっきり）
+  WIRE.edgeV = v;
+  $("#edgeVal").textContent = v <= 4 ? "繊細" : (v <= 10 ? "標準" : "くっきり");
+  if (!edgeStage) return;
+  if (edgeStage.custom){
+    const u = edgeStage.stage.uniforms;
+    u.u_strength  = 0.45 + v * 0.05;        // 濃さ
+    u.u_threshold = 0.0032 - v * 0.00012;   // 小さいほど細かい輪郭まで拾う
+  }else if (edgeStage.edge){
+    edgeStage.edge.uniforms.length = 0.004 + v * 0.004;
+  }
+}
+
+function resetWire(){
+  Object.assign(WIRE, WIRE_DEFAULT);
+  $("#wEdge").value = WIRE.edge;
+  $("#wFill").value = WIRE.fill;
+  $("#wBg").value   = WIRE.ground;
+  $("#wWidth").value = WIRE.width;
+  $("#edge").value   = WIRE.edgeV;
+  $("#wFade").value  = WIRE.fadeKm;
+  applyEdgeWidth(WIRE.width);
+  applyEdgeFade(WIRE.fadeKm);
+  applyEdgeStrength(WIRE.edgeV);
+  applyWireColors();
 }
 
 /* ---------------------------------------------------------------- 日照/影 */
@@ -1151,7 +1319,13 @@ function buildStaticUI(){
   });
   $("#dmStandard").onclick = () => ready() && setDisplayMode("standard");
   $("#dmWire").onclick     = () => ready() && setDisplayMode("wire");
-  $("#edge").oninput = (e) => ready() && applyEdgeStrength(+e.target.value);
+  $("#edge").oninput   = (e) => ready() && applyEdgeStrength(+e.target.value);
+  $("#wWidth").oninput = (e) => ready() && applyEdgeWidth(+e.target.value);
+  $("#wFade").oninput  = (e) => ready() && applyEdgeFade(+e.target.value);
+  $("#wEdge").oninput  = (e) => { WIRE.edge   = e.target.value; ready() && applyWireColors(); };
+  $("#wFill").oninput  = (e) => { WIRE.fill   = e.target.value; ready() && applyWireColors(); };
+  $("#wBg").oninput    = (e) => { WIRE.ground = e.target.value; ready() && applyWireColors(); };
+  $("#wReset").onclick = () => ready() && resetWire();
 
   $("#terrainOn").onclick  = () => ready() && setTerrain(true);
   $("#terrainOff").onclick = () => ready() && setTerrain(false);

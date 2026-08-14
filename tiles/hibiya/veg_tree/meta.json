@@ -1,7 +1,7 @@
 {
   "feature": "SolitaryVegetationObject",
-  "features": 110,
-  "tiles": 4,
-  "triangles": 72318,
+  "features": 328,
+  "tiles": 9,
+  "triangles": 109622,
   "zoffset": 0.0
 }
