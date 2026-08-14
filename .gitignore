@@ -1,0 +1,21 @@
+# --- GitHub Pages はリポジトリのルートを公開する ------------------------
+# 公開に必要なのは以下。これら以外は追跡しない。
+#   .nojekyll / index.html / catalog.json / tiles/ / vendor/
+
+# 旧構成の残骸（ルートに同じものがあるので不要）
+docs/
+
+# PLATEAU の配布ZIP・CityGML（GitHub の 100MB/ファイル制限を超える）
+*.zip
+*.gml
+*.xml
+input/
+data/
+
+# 作業用・OS が作るもの
+_to_delete/
+_claude_scratch/
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/

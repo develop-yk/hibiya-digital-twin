@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HIBIYA DIGITAL TWIN — Project PLATEAU 3D VIEW</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:rgba(15,20,27,.90); --panel2:rgba(255,255,255,.045);
+    --line:rgba(255,255,255,.11); --fg:#e8eef5; --dim:#93a1b0; --dim2:#6d7b8a;
+    --accent:#4aa8ff; --ok:#4ade80; --warn:#fbbf24; --err:#f87171;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);overflow:hidden;
+    font-family:"Hiragino Sans","Noto Sans JP","Yu Gothic UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  #cesiumContainer{position:absolute;inset:0}
+  .cesium-widget-credits{font-size:10px !important;max-width:46vw}
+
+  /* ---------- boot ---------- */
+  #boot{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:16px;background:var(--bg);z-index:80;text-align:center;padding:24px}
+  #boot h1{font-size:14px;letter-spacing:.3em;margin:0;font-weight:600;color:var(--fg)}
+  #boot .sub{font-size:10.5px;letter-spacing:.18em;color:var(--dim2);margin-top:-8px}
+  #boot .msg{font-size:12px;color:var(--dim);max-width:560px;line-height:1.8}
+  .spinner{width:28px;height:28px;border:2px solid rgba(255,255,255,.14);
+    border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* ---------- left panel ---------- */
+  #ui{position:absolute;top:0;left:0;height:100%;width:320px;z-index:20;
+    background:var(--panel);backdrop-filter:blur(16px);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;overflow:hidden;transition:transform .25s ease}
+  #ui.collapsed{transform:translateX(-320px)}
+  #uiToggle{position:absolute;top:12px;left:332px;z-index:21;width:34px;height:34px;
+    border-radius:9px;border:1px solid var(--line);background:var(--panel);color:var(--fg);
+    cursor:pointer;font-size:15px;line-height:1;transition:left .25s ease;backdrop-filter:blur(16px)}
+  #ui.collapsed ~ #uiToggle{left:10px}
+
+  .head{padding:15px 16px 12px;border-bottom:1px solid var(--line)}
+  .head h1{margin:0;font-size:12.5px;letter-spacing:.26em;font-weight:600}
+  .head p{margin:5px 0 0;font-size:10px;color:var(--dim2);line-height:1.65}
+  .body{flex:1;overflow-y:auto;overscroll-behavior:contain}
+  .body::-webkit-scrollbar{width:8px}
+  .body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:4px}
+  .sec{padding:12px 16px;border-bottom:1px solid var(--line)}
+  .sec h2{margin:0 0 9px;font-size:10px;letter-spacing:.18em;color:var(--dim2);font-weight:700;
+    display:flex;justify-content:space-between;align-items:center}
+  .sec h2 span.n{font-weight:500;letter-spacing:0;color:var(--dim2)}
+
+  .row{display:flex;gap:5px;flex-wrap:wrap}
+  button.chip{flex:1 1 auto;min-width:58px;padding:6px 8px;font-size:10.5px;border-radius:7px;
+    border:1px solid var(--line);background:var(--panel2);color:var(--fg);cursor:pointer;
+    transition:background .12s,border-color .12s}
+  button.chip:hover{background:rgba(255,255,255,.11)}
+  button.chip.on{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:700}
+
+  .grp{margin-bottom:11px}
+  .grp:last-child{margin-bottom:0}
+  .grp .gt{font-size:9.5px;color:var(--dim2);letter-spacing:.1em;margin:0 0 5px 1px}
+  .lyr{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:7px;cursor:pointer;
+    font-size:11.5px;line-height:1.35;user-select:none;border:1px solid transparent}
+  .lyr:hover{background:rgba(255,255,255,.055)}
+  .lyr.on{background:rgba(74,168,255,.12);border-color:rgba(74,168,255,.32)}
+  .lyr .sw{width:9px;height:9px;border-radius:2.5px;flex:0 0 auto;opacity:.45}
+  .lyr.on .sw{opacity:1;box-shadow:0 0 0 2px rgba(255,255,255,.10)}
+  .lyr .tx{flex:1;min-width:0}
+  .lyr .tx b{display:block;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lyr .tx i{font-style:normal;font-size:9px;color:var(--dim2)}
+  .lyr .st{font-size:9px;color:var(--dim2);flex:0 0 auto}
+  .lyr.busy .st{color:var(--warn)}
+  .lyr.fail{opacity:.5}
+
+  label.sl{display:flex;justify-content:space-between;font-size:10px;color:var(--dim);
+    margin:10px 0 3px}
+  label.sl b{color:var(--fg);font-weight:600}
+  input[type=range]{width:100%;accent-color:var(--accent);height:18px}
+  input[type=date],input[type=time]{width:100%;background:var(--panel2);color:var(--fg);
+    border:1px solid var(--line);border-radius:7px;padding:5px 8px;font-size:11px;
+    font-family:inherit;color-scheme:dark}
+
+  .bm{display:block;width:100%;text-align:left;padding:6px 10px;margin-bottom:3px;font-size:11px;
+    border-radius:7px;border:1px solid transparent;background:var(--panel2);color:var(--fg);cursor:pointer}
+  .bm:hover{background:rgba(74,168,255,.18);border-color:rgba(74,168,255,.45)}
+  .bm small{display:block;color:var(--dim2);font-size:9px;margin-top:1px}
+
+  .legend{margin-top:9px;display:none;font-size:10px;color:var(--dim);line-height:1.5}
+  .legend.show{display:block}
+  .legend .li{display:flex;align-items:center;gap:6px;padding:1.5px 0}
+  .legend .li i{width:11px;height:11px;border-radius:2.5px;flex:0 0 auto;display:inline-block}
+
+  .status{font-size:10px;line-height:1.8;color:var(--dim)}
+  .status b{color:var(--fg);font-weight:600}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px}
+  .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)}
+  .dot.err{background:var(--err)} .dot.idle{background:var(--dim2)}
+
+  .foot{padding:10px 16px;border-top:1px solid var(--line);font-size:9px;color:var(--dim2);line-height:1.7}
+  .foot a{color:var(--accent);text-decoration:none}
+
+  /* ---------- right info panel ---------- */
+  #info{position:absolute;top:12px;right:12px;z-index:22;width:330px;max-height:calc(100% - 130px);
+    background:var(--panel);backdrop-filter:blur(16px);border:1px solid var(--line);
+    border-radius:11px;display:none;flex-direction:column;overflow:hidden}
+  #info.show{display:flex}
+  #info .ih{padding:11px 13px;border-bottom:1px solid var(--line);display:flex;
+    align-items:flex-start;gap:8px}
+  #info .ih h3{margin:0;font-size:12.5px;font-weight:600;flex:1;line-height:1.45;word-break:break-all}
+  #info .ih .tag{font-size:9px;color:var(--dim2);display:block;margin-top:3px;letter-spacing:.06em}
+  #info .ih button{background:none;border:none;color:var(--dim);font-size:16px;cursor:pointer;
+    line-height:1;padding:0 2px}
+  #info .ib{overflow-y:auto;padding:4px 13px 12px}
+  #info .ib::-webkit-scrollbar{width:8px}
+  #info .ib::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:4px}
+  .kv{display:grid;grid-template-columns:96px 1fr;gap:3px 9px;font-size:10.5px;padding:6px 0;
+    border-bottom:1px solid rgba(255,255,255,.055)}
+  .kv:last-child{border-bottom:none}
+  .kv dt{color:var(--dim2);line-height:1.5;word-break:break-all}
+  .kv dd{margin:0;color:var(--fg);line-height:1.5;word-break:break-all}
+  #info .more{width:100%;margin-top:9px;padding:6px;font-size:10px;border-radius:7px;
+    border:1px solid var(--line);background:var(--panel2);color:var(--dim);cursor:pointer}
+  #info .more:hover{color:var(--fg)}
+
+  /* ---------- hud ---------- */
+  #hud{position:absolute;right:12px;bottom:30px;z-index:20;background:var(--panel);
+    border:1px solid var(--line);border-radius:9px;padding:7px 11px;font-size:10px;
+    color:var(--dim2);line-height:1.65;backdrop-filter:blur(16px);min-width:166px}
+  #hud b{color:var(--fg);font-weight:600;float:right;margin-left:10px}
+  #err{position:absolute;left:50%;top:16px;transform:translateX(-50%);z-index:60;max-width:min(680px,74vw);
+    background:rgba(112,24,24,.95);border:1px solid #f87171;color:#ffe7e7;padding:11px 15px;
+    border-radius:10px;font-size:11.5px;line-height:1.75;display:none}
+  #err code{background:rgba(0,0,0,.3);padding:1px 5px;border-radius:4px}
+  @media (max-width:860px){
+    #info{width:auto;left:12px;right:12px;top:auto;bottom:12px;max-height:44%}
+    #hud{display:none}
+  }
+</style>
+</head>
+<body>
+
+<div id="cesiumContainer"></div>
+
+<div id="boot">
+  <div class="spinner"></div>
+  <h1>HIBIYA DIGITAL TWIN</h1>
+  <div class="sub">PROJECT PLATEAU / 3D VIEW</div>
+  <div class="msg" id="bootMsg">CesiumJS を読み込んでいます…</div>
+</div>
+
+<div id="err"></div>
+
+<div id="ui">
+  <div class="head">
+    <h1>HIBIYA DIGITAL TWIN</h1>
+    <p id="headSub">3D都市モデル Project PLATEAU</p>
+  </div>
+  <div class="body">
+
+    <div class="sec">
+      <h2>データレイヤー <span class="n" id="layerCount"></span></h2>
+      <div id="layers"></div>
+    </div>
+
+    <div class="sec">
+      <h2>建築物の色分け</h2>
+      <div class="row" id="colorModes"></div>
+      <div class="legend" id="legend"></div>
+      <label class="sl">建物の不透明度 <b id="opacityVal">100%</b></label>
+      <input type="range" id="opacity" min="15" max="100" value="100">
+    </div>
+
+    <div class="sec">
+      <h2>日照・影</h2>
+      <div class="row">
+        <button class="chip" id="shadowOn">影あり</button>
+        <button class="chip on" id="shadowOff">影なし</button>
+      </div>
+      <label class="sl">日付</label>
+      <input type="date" id="sunDate">
+      <label class="sl">時刻（JST） <b id="sunTimeVal">12:00</b></label>
+      <input type="range" id="sunTime" min="0" max="1439" step="15" value="720">
+    </div>
+
+    <div class="sec">
+      <h2>地形・背景</h2>
+      <div class="row">
+        <button class="chip on" data-img="photo">航空写真</button>
+        <button class="chip" data-img="pale">淡色地図</button>
+        <button class="chip" data-img="std">標準地図</button>
+        <button class="chip" data-img="none">なし</button>
+      </div>
+      <div class="row" style="margin-top:5px">
+        <button class="chip on" id="terrainOn">地形あり</button>
+        <button class="chip" id="terrainOff">平面</button>
+      </div>
+      <label class="sl">高さ強調 <b id="exagVal">1.0×</b></label>
+      <input type="range" id="exag" min="1" max="8" step="0.5" value="1">
+      <label class="sl">ジオイド補正 <b id="geoidVal">36.6 m</b></label>
+      <input type="range" id="geoid" min="0" max="45" step="0.1" value="36.6">
+    </div>
+
+    <div class="sec">
+      <h2>視点</h2>
+      <div id="bookmarks"></div>
+    </div>
+
+    <div class="sec">
+      <h2>描画品質</h2>
+      <label class="sl">タイル解像度 <b id="sseVal">標準</b></label>
+      <input type="range" id="sse" min="4" max="40" step="2" value="16">
+      <div class="status" style="margin-top:7px" id="tileStat"></div>
+    </div>
+
+    <div class="sec">
+      <h2>ステータス</h2>
+      <div class="status" id="status"></div>
+    </div>
+
+  </div>
+  <div class="foot">
+    出典：<a href="https://www.mlit.go.jp/plateau/" target="_blank" rel="noopener">国土交通省 Project PLATEAU</a>（3D都市モデル・CC BY 4.0）／
+    <a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院タイル</a>（背景地図・標高）／
+    描画 <a href="https://cesium.com/platform/cesiumjs/" target="_blank" rel="noopener">CesiumJS</a>
+  </div>
+</div>
+<button id="uiToggle" title="パネル開閉">☰</button>
+
+<div id="info">
+  <div class="ih">
+    <div style="flex:1;min-width:0">
+      <h3 id="infoTitle">—</h3>
+      <span class="tag" id="infoTag"></span>
+    </div>
+    <button id="infoClose" title="閉じる">×</button>
+  </div>
+  <div class="ib">
+    <div id="infoBody"></div>
+    <button class="more" id="infoMore">全属性を表示</button>
+  </div>
+</div>
+
+<div id="hud">
+  <div>視点高度 <b id="hudAlt">–</b></div>
+  <div>緯度経度 <b id="hudPos">–</b></div>
+  <div>方位 <b id="hudHeading">–</b></div>
+</div>
+
+<script>
+/* ==========================================================================
+   HIBIYA DIGITAL TWIN — Project PLATEAU 3D VIEW
+   --------------------------------------------------------------------------
+   serve.py が PLATEAU 配布ZIP から直接配信する 3D Tiles を CesiumJS で表示する。
+   レイヤー構成はサーバの /api/catalog から動的に組み立てるため、
+   別の市区のZIPを追加すれば自動的にこのUIへ現れる。
+   ========================================================================== */
+
+const CONFIG = {
+  // 静的サイト（GitHub Pages）では隣の catalog.json、
+  // serve.py 経由ではサーバが動的に返す /api/catalog を使う。上から順に試す。
+  catalogUrls: ["catalog.json", "/api/catalog"],
+  gsi: {
+    dem:   "https://cyberjapandata.gsi.go.jp/xyz/dem_png/{z}/{x}/{y}.png",
+    photo: "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg",
+    pale:  "https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png",
+    std:   "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png"
+  },
+  home: { lon: 139.75937, lat: 35.67472 },
+  geoidOffset: 36.6          // カタログの値で上書きされる
+};
+
+const BOOKMARKS = [
+  { name:"日比谷 全景",             note:"エリア全体を俯瞰",             lon:139.7592, lat:35.6745, range:1700, heading:20,  pitch:-40 },
+  { name:"日比谷交差点",             note:"晴海通り × 日比谷通り",        lon:139.75937,lat:35.67472,range:430,  heading:45,  pitch:-25 },
+  { name:"日比谷公園",               note:"大噴水・心字池",               lon:139.75570,lat:35.67390,range:620,  heading:70,  pitch:-30 },
+  { name:"東京ミッドタウン日比谷",   note:"日比谷仲通り側",               lon:139.75960,lat:35.67330,range:390,  heading:330, pitch:-20 },
+  { name:"帝国ホテル 東京",          note:"内幸町側から",                 lon:139.75830,lat:35.67230,range:400,  heading:15,  pitch:-22 },
+  { name:"皇居外苑・二重橋",         note:"日比谷濠ごしに丸の内",         lon:139.75420,lat:35.67960,range:950,  heading:135, pitch:-28 },
+  { name:"東京駅・丸の内",           note:"駅前広場と丸の内ビル群",       lon:139.76710,lat:35.68120,range:900,  heading:250, pitch:-28 },
+  { name:"銀座四丁目",               note:"中央通り × 晴海通り",          lon:139.76700,lat:35.67130,range:600,  heading:20,  pitch:-25 },
+  { name:"日本橋",                   note:"日本橋川と首都高",             lon:139.77420,lat:35.68390,range:600,  heading:200, pitch:-25 },
+  { name:"霞が関",                   note:"官庁街と日比谷公園",           lon:139.75150,lat:35.67350,range:850,  heading:90,  pitch:-27 },
+  { name:"ストリートレベル",         note:"歩行者視点（日比谷交差点）",   lon:139.75937,lat:35.67472,range:110,  heading:300, pitch:-3  }
+];
+
+/* ------------------------------------------------------- 建築物 色分け定義 */
+const HEIGHT_STOPS = [
+  [180, "#6a1b4d", "180m 以上"], [120, "#a32c5e", "120–180m"],
+  [ 80, "#d94f4f", "80–120m"],   [ 50, "#f0863c", "50–80m"],
+  [ 30, "#f3c73f", "30–50m"],    [ 15, "#9ccb5a", "15–30m"],
+  [  0, "#54a6c6", "15m 未満"]
+];
+const STOREY_STOPS = [
+  [40, "#5b1a6b", "40階以上"], [30, "#8e2b8a", "30–39階"],
+  [20, "#c2408a", "20–29階"],  [12, "#e86a54", "12–19階"],
+  [ 7, "#f0a63f", "7–11階"],   [ 4, "#c8cf4a", "4–6階"],
+  [ 0, "#66b0c4", "3階以下"]
+];
+const USAGE_COLORS = {
+  "業務施設":"#4a8fd4", "商業施設":"#e07a3f", "宿泊施設":"#d9539b",
+  "住宅":"#6ec27a", "共同住宅":"#3f9e6a", "店舗等併用住宅":"#a8c85a",
+  "店舗等併用共同住宅":"#8dbf4a", "作業所併用住宅":"#b59a54",
+  "官公庁施設":"#9b6ad4", "文教厚生施設":"#4ec2c2", "運輸倉庫施設":"#8a8f98",
+  "供給処理施設":"#c0705a", "工場":"#7a6a5a", "農林漁業用施設":"#6f9a3f",
+  "その他":"#99a0a8", "不明":"#5d6772"
+};
+const ZONE_COLORS = {
+  "商業地域":"#e8635a", "近隣商業地域":"#f0946a",
+  "第1種住居地域":"#7fbf7f", "第2種住居地域":"#5faa6a", "準住居地域":"#4f9e8a",
+  "準工業地域":"#b58ad4", "工業地域":"#9a7ac0", "工業専用地域":"#7f5fa8",
+  "第1種低層住居専用地域":"#a8d98a", "第2種低層住居専用地域":"#8fcf72",
+  "第1種中高層住居専用地域":"#6fc26a", "第2種中高層住居専用地域":"#55b062",
+  "田園住居地域":"#c9d98a", "用途地域の指定をしない区域":"#8f979f"
+};
+const FLOOD_STOPS = [
+  [5.0, "#3b1478", "5m 以上"], [3.0, "#5b21a8", "3–5m"],
+  [2.0, "#1565c0", "2–3m"],    [1.0, "#1e88e5", "1–2m"],
+  [0.5, "#46a8f0", "0.5–1m"],  [0.0001, "#96cdf5", "0.5m 未満"]
+];
+
+const CATEGORY_LABEL = {
+  building: "建築物", infra: "都市インフラ", nature: "自然", risk: "災害リスク", other: "その他"
+};
+
+/* 属性名。PLATEAU 配布の 3D Tiles を既定とし、カタログの `props` で上書きできる。
+   CityGML から自前変換したタイルは属性名が違うため、こちらで吸収する。
+   値を null にするとその色分けモードを出さない。 */
+const DEFAULT_PROPS = {
+  name:    "gml:name",
+  usage:   "bldg:usage",
+  cls:     "bldg:class",
+  height:  "bldg:measuredHeight",
+  storeys: "bldg:storeysAboveGround",
+  zone:    "uro:BuildingDetailAttribute_uro:districtsAndZonesType"
+};
+let PROPS = DEFAULT_PROPS;
+
+/* 属性パネルに出す項目（キー, 見出し, 単位）。カタログの `infoProps` で差し替え可能 */
+const DEFAULT_INFO_PROPS = [
+  ["gml:name", "名称"],
+  ["bldg:usage", "用途"],
+  ["bldg:class", "建物分類"],
+  ["bldg:measuredHeight", "計測高さ", "m"],
+  ["bldg:storeysAboveGround", "地上階数", "階"],
+  ["bldg:storeysBelowGround", "地下階数", "階"],
+  ["bldg:address", "所在地"],
+  ["uro:BuildingDetailAttribute_uro:buildingRoofEdgeArea", "屋根面積", "m²"],
+  ["uro:BuildingDetailAttribute_uro:districtsAndZonesType", "用途地域"],
+  ["uro:BuildingDetailAttribute_uro:landUseType", "土地利用"],
+  ["uro:BuildingDetailAttribute_uro:fireproofStructureType", "防火構造"],
+  ["uro:BuildingDetailAttribute_uro:specifiedBuildingCoverageRate", "建蔽率", "%"],
+  ["uro:BuildingDetailAttribute_uro:specifiedFloorAreaRate", "容積率", "%"],
+  ["uro:BuildingDetailAttribute_uro:surveyYear", "調査年"],
+  ["uro:BuildingIDAttribute_uro:buildingID", "建物ID"],
+  ["uro:lodType", "LOD"],
+  ["city_name", "市区町村"],
+  ["core:creationDate", "作成日"]
+];
+
+/* ---------------------------------------------------------------- helpers */
+const $ = (s) => document.querySelector(s);
+const bootMsg = (t) => { const e = $("#bootMsg"); if (e) e.textContent = t; };
+const fmtBytes = (b) => b >= 1073741824 ? (b/1073741824).toFixed(1)+" GB"
+                      : b >= 1048576    ? (b/1048576).toFixed(0)+" MB"
+                      : (b/1024).toFixed(0)+" KB";
+function showError(html){ const e = $("#err"); e.innerHTML = html; e.style.display = "block"; }
+function hideError(){ $("#err").style.display = "none"; }
+function loadScript(src){
+  return new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = src; s.async = true;
+    s.onload = () => res(src);
+    s.onerror = () => { s.remove(); rej(new Error("script load failed: " + src)); };
+    document.head.appendChild(s);
+  });
+}
+function loadCss(href){
+  return new Promise((res) => {
+    const l = document.createElement("link");
+    l.rel = "stylesheet"; l.href = href;
+    l.onload = l.onerror = () => res();
+    document.head.appendChild(l);
+  });
+}
+
+// CDN より先に自前ホストの CesiumJS を試す。社内ネットワークで jsDelivr 等が
+// 遮断されていても動くようにするため、リポジトリに Cesium を同梱している。
+//   docs/index.html   から見て  vendor/cesium/
+//   viewer/index.html から見て  ../docs/vendor/cesium/
+// `?cesiumBase=…` で明示指定もできる。
+const CESIUM_CDNS = [
+  new URLSearchParams(location.search).get("cesiumBase"),
+  "vendor/cesium/",
+  "../docs/vendor/cesium/",
+  "https://cdn.jsdelivr.net/npm/cesium@1.126.0/Build/Cesium/",
+  "https://unpkg.com/cesium@1.126.0/Build/Cesium/",
+  "https://cesium.com/downloads/cesiumjs/releases/1.126/Build/Cesium/",
+  "https://cdn.jsdelivr.net/npm/cesium/Build/Cesium/"
+].filter(Boolean);
+async function loadCesium(){
+  const tried = [];
+  for (const cand of CESIUM_CDNS){
+    // Cesium は CESIUM_BASE_URL から Workers/Assets を読むので絶対URLにしておく
+    const base = new URL(cand, location.href).href;
+    try{
+      window.CESIUM_BASE_URL = base;
+      await loadCss(base + "Widgets/widgets.css");
+      await loadScript(base + "Cesium.js");
+      if (window.Cesium){ console.log("CesiumJS loaded from", base); return base; }
+    }catch(_e){ tried.push(cand); }
+  }
+  throw new Error("CesiumJS を読み込めませんでした。<br>" +
+    "同梱版・CDN のいずれからも取得できていません（社内ネットワークの遮断など）。<br>" +
+    "<span style='opacity:.75'>試行: " + tried.join(" / ") + "</span>");
+}
+
+/* -------------------------------------- 地理院標高タイル TerrainProvider */
+function createGsiTerrainProvider(Cesium){
+  const TILE = 65;
+  class GsiTerrainProvider {
+    constructor(){
+      this._tilingScheme = new Cesium.WebMercatorTilingScheme({
+        numberOfLevelZeroTilesX: 1, numberOfLevelZeroTilesY: 1,
+        ellipsoid: Cesium.Ellipsoid.WGS84
+      });
+      this._errorEvent = new Cesium.Event();
+      this._credit = new Cesium.Credit("国土地理院 標高タイル", false);
+      this._maxLevel = 14;
+      this._lz = Cesium.TerrainProvider.getEstimatedLevelZeroGeometricErrorForAHeightmap(
+        this._tilingScheme.ellipsoid, TILE, this._tilingScheme.getNumberOfXTilesAtLevel(0));
+      this._canvas = document.createElement("canvas");
+      this._canvas.width = this._canvas.height = 256;
+      this._ctx = this._canvas.getContext("2d", { willReadFrequently: true });
+      this._structure = { heightScale:1.0, heightOffset:0.0, elementsPerHeight:1,
+                          stride:1, elementMultiplier:256.0, isBigEndian:false };
+    }
+    get errorEvent(){ return this._errorEvent; }
+    get credit(){ return this._credit; }
+    get tilingScheme(){ return this._tilingScheme; }
+    get hasWaterMask(){ return false; }
+    get hasVertexNormals(){ return false; }
+    get availability(){ return undefined; }
+    get ready(){ return true; }
+    get readyPromise(){ return Promise.resolve(true); }
+    getLevelMaximumGeometricError(level){ return this._lz / (1 << level); }
+    getTileDataAvailable(x, y, level){ return level <= this._maxLevel ? undefined : false; }
+    loadTileDataAvailability(){ return undefined; }
+
+    _flatData(level){
+      const h = new Float32Array(TILE*TILE);
+      h.fill(CONFIG.geoidOffset);
+      return new Cesium.HeightmapTerrainData({ buffer:h, width:TILE, height:TILE,
+        structure:this._structure, childTileMask: level < this._maxLevel ? 15 : 0 });
+    }
+    requestTileGeometry(x, y, level, request){
+      if (level > this._maxLevel) return undefined;
+      const url = CONFIG.gsi.dem.replace("{z}", level).replace("{x}", x).replace("{y}", y);
+      const promise = new Cesium.Resource({ url }).fetchImage({ request, preferImageBitmap: true });
+      if (!Cesium.defined(promise)) return undefined;    // 同時リクエスト上限 → 後で再試行
+      return Promise.resolve(promise).then((image) => {
+        const heights = new Float32Array(TILE * TILE);
+        try{
+          this._ctx.clearRect(0, 0, 256, 256);
+          this._ctx.drawImage(image, 0, 0, 256, 256);
+          const px = this._ctx.getImageData(0, 0, 256, 256).data;
+          const step = 255 / (TILE - 1);
+          for (let j = 0; j < TILE; j++){
+            const sy = Math.min(255, Math.round(j * step));
+            for (let i = 0; i < TILE; i++){
+              const sx = Math.min(255, Math.round(i * step));
+              const o = (sy * 256 + sx) * 4;
+              const r = px[o], g = px[o+1], b = px[o+2], a = px[o+3];
+              let h = 0;
+              if (a !== 0 && !(r === 128 && g === 0 && b === 0)){
+                const v = r * 65536 + g * 256 + b;
+                h = (v < 8388608) ? v * 0.01 : (v - 16777216) * 0.01;
+                if (h < -500 || h > 4000) h = 0;
+              }
+              // PLATEAU の 3D Tiles は楕円体高。標高タイル(T.P.)にジオイド高を足して揃える。
+              heights[j * TILE + i] = h + CONFIG.geoidOffset;
+            }
+          }
+        }catch(_e){ /* CORS 等で読めない場合は平坦 */ }
+        return new Cesium.HeightmapTerrainData({ buffer:heights, width:TILE, height:TILE,
+          structure:this._structure, childTileMask: level < this._maxLevel ? 15 : 0 });
+      }).catch(() => this._flatData(level));
+    }
+  }
+  return new GsiTerrainProvider();
+}
+
+/* ------------------------------------------------------------------ state */
+// CesiumJS の UMD ビルドは末尾で `var Cesium = …` を宣言する。ここで `let Cesium`
+// と書くと同名の字句宣言が衝突し、Cesium.js が SyntaxError で丸ごと実行されない。
+// 必ず `var` で宣言すること。
+var Cesium;
+let viewer, terrainProvider, imageryLayer = null;
+let CATALOG = null;
+const LAYERS = new Map();            // id -> {def, tilesets:[], on, loading, failed, el}
+let colorMode = "texture";
+let opacity = 1.0;
+let selected = null;                 // {feature, originalColor}
+let showAllProps = false;
+
+const statusLines = {};
+function setStatus(key, dot, text){
+  statusLines[key] = '<span class="dot ' + dot + '"></span>' + text;
+  $("#status").innerHTML = Object.values(statusLines).filter(Boolean).join("<br>");
+}
+
+/* ------------------------------------------------------------------- main */
+(async function main(){
+  buildStaticUI();
+  try{
+    bootMsg("CesiumJS を読み込んでいます…");
+    await loadCesium();
+    Cesium = window.Cesium;
+    setStatus("cesium", "ok", "CesiumJS <b>" + Cesium.VERSION + "</b>");
+
+    bootMsg("データカタログを取得しています…");
+    CATALOG = await fetchCatalog();
+    PROPS = Object.assign({}, DEFAULT_PROPS, CATALOG.props || {});
+    if (CATALOG.textured === false) colorMode = "mono";
+    if (CATALOG.geoidOffset != null){
+      CONFIG.geoidOffset = CATALOG.geoidOffset;
+      $("#geoid").value = CONFIG.geoidOffset;
+      $("#geoidVal").textContent = CONFIG.geoidOffset.toFixed(1) + " m";
+    }
+
+    bootMsg("シーンを初期化しています…");
+    initViewer();
+    buildLayerUI();
+    buildColorModeUI();
+
+    $("#boot").style.display = "none";
+    flyBookmark(BOOKMARKS[0], 0);
+    startHud();
+
+    // 既定ONのレイヤーを読み込む
+    for (const [id, L] of LAYERS){
+      if (L.def.defaultOn) toggleLayer(id, true);
+    }
+  }catch(err){
+    bootMsg("初期化に失敗しました");
+    console.error(err);
+    showError("<b>初期化エラー</b><br>" + (err && err.message ? err.message : err));
+  }
+})();
+
+async function fetchCatalog(){
+  if (location.protocol === "file:"){
+    throw new Error("<code>file://</code> では 3D Tiles を読み込めません。" +
+      "プロジェクト直下で <code>python3 serve.py</code> を実行し、" +
+      "<code>http://localhost:8080/viewer/</code> を開いてください。");
+  }
+  let cat = null;
+  for (const url of CONFIG.catalogUrls){
+    try{
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) continue;
+      cat = await res.json();
+      break;
+    }catch(_e){ /* 次の候補へ */ }
+  }
+  if (!cat){
+    throw new Error("データカタログを取得できませんでした。<br>" +
+      "ローカルで開いている場合は <code>python3 serve.py</code> が起動しているか、" +
+      "静的サイトの場合は <code>catalog.json</code> が同じ場所にあるかを確認してください。");
+  }
+  if (!cat.wards || !cat.wards.length){
+    showError("<b>PLATEAU の配布ZIP が見つかりません。</b><br>" +
+      "<code>&lt;市区名&gt;/&lt;コード&gt;_&lt;市区&gt;_..._3dtiles_mvt_1_op.zip</code> を配置して " +
+      "<code>serve.py</code> を再起動してください。");
+  }
+  return cat;
+}
+
+function initViewer(){
+  try { Cesium.Ion.defaultAccessToken = undefined; } catch(_e){}
+  terrainProvider = createGsiTerrainProvider(Cesium);
+
+  viewer = new Cesium.Viewer("cesiumContainer", {
+    baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
+      url: CONFIG.gsi.photo, maximumLevel: 18, credit: "国土地理院 シームレス空中写真"
+    })),
+    terrainProvider: terrainProvider,
+    baseLayerPicker:false, geocoder:false, homeButton:false, infoBox:false,
+    selectionIndicator:false, navigationHelpButton:false, sceneModePicker:false,
+    timeline:false, animation:false, fullscreenButton:true, requestRenderMode:false,
+    shadows:false,
+    contextOptions:{ webgl:{ powerPreference:"high-performance" } }
+  });
+  imageryLayer = viewer.imageryLayers.get(0);
+  setStatus("imagery", "ok", "背景：地理院 航空写真");
+  setStatus("terrain", "ok", "地形：地理院 標高タイル");
+
+  const scene = viewer.scene;
+  scene.globe.depthTestAgainstTerrain = true;
+  scene.globe.baseColor = Cesium.Color.fromCssColorString("#0e141b");
+  scene.globe.maximumScreenSpaceError = 1.8;
+  scene.skyAtmosphere.show = true;
+  scene.fog.enabled = true;
+  scene.msaaSamples = 4;
+  scene.postProcessStages.fxaa.enabled = true;
+  scene.screenSpaceCameraController.enableCollisionDetection = true;
+  scene.screenSpaceCameraController.minimumZoomDistance = 2.0;
+  scene.screenSpaceCameraController.maximumZoomDistance = 200000;
+  viewer.resolutionScale = Math.min(window.devicePixelRatio || 1, 2);
+  viewer.shadowMap.size = 2048;
+  viewer.shadowMap.softShadows = true;
+  viewer.shadowMap.maximumDistance = 6000;
+  viewer.terrainShadows = Cesium.ShadowMode.RECEIVE_ONLY;
+  viewer.clock.shouldAnimate = false;
+
+  try{
+    viewer.creditDisplay.addStaticCredit(new Cesium.Credit(
+      '3D都市モデル：<a href="https://www.mlit.go.jp/plateau/" target="_blank">国土交通省 Project PLATEAU</a>', true));
+  }catch(_e){}
+  if (!("verticalExaggeration" in scene)) $("#exag").disabled = true;
+
+  const wards = (CATALOG.wards || []).map(w => w.name).join("・");
+  const yr = CATALOG.wards && CATALOG.wards[0] ? CATALOG.wards[0].year : "";
+  $("#headSub").textContent = wards ? (wards + "  /  " + yr + "年度版") : "データ未検出";
+
+  applySun();
+  installPicking();
+}
+
+/* --------------------------------------------------------- レイヤー管理 */
+function buildLayerUI(){
+  const box = $("#layers");
+  box.innerHTML = "";
+  const byCat = new Map();
+  for (const def of (CATALOG.layers || [])){
+    if (!byCat.has(def.category)) byCat.set(def.category, []);
+    byCat.get(def.category).push(def);
+  }
+  let total = 0;
+  for (const cat of ["building", "infra", "nature", "risk", "other"]){
+    const defs = byCat.get(cat);
+    if (!defs || !defs.length) continue;
+    const grp = document.createElement("div");
+    grp.className = "grp";
+    const gt = document.createElement("div");
+    gt.className = "gt";
+    gt.textContent = CATEGORY_LABEL[cat] || cat;
+    grp.appendChild(gt);
+
+    for (const def of defs){
+      total++;
+      const el = document.createElement("div");
+      el.className = "lyr";
+      const wardNames = def.sources.map(s => wardName(s.ward)).join("・");
+      el.innerHTML =
+        '<span class="sw" style="background:' + def.color + '"></span>' +
+        '<span class="tx"><b></b><i></i></span>' +
+        '<span class="st"></span>';
+      el.querySelector("b").textContent = def.label;
+      el.querySelector("i").textContent =
+        [def.detail, wardNames, fmtBytes(def.bytes)].filter(Boolean).join(" · ");
+      el.title = def.label + "\n" + def.sources.map(s =>
+        wardName(s.ward) + "：" + s.tiles + " タイル / " + fmtBytes(s.bytes)).join("\n");
+      el.onclick = () => toggleLayer(def.id);
+      grp.appendChild(el);
+      LAYERS.set(def.id, { def, tilesets: [], on:false, loading:false, failed:false, el });
+    }
+    box.appendChild(grp);
+  }
+  $("#layerCount").textContent = total ? total + " 種" : "";
+  if (!total) box.innerHTML = '<div class="status">レイヤーが検出されていません</div>';
+}
+
+function wardName(key){
+  const w = (CATALOG.wards || []).find(x => x.key === key);
+  return w ? w.name : key;
+}
+
+async function toggleLayer(id, force){
+  const L = LAYERS.get(id);
+  if (!L || L.loading) return;
+  const next = (force === undefined) ? !L.on : force;
+
+  if (L.tilesets.length){                       // 読み込み済み → 表示切替のみ
+    L.on = next;
+    L.tilesets.forEach(ts => { ts.show = next; });
+    L.el.classList.toggle("on", next);
+    L.el.querySelector(".st").textContent = next ? "表示" : "";
+    updateLoadedStatus();
+    return;
+  }
+  if (!next) return;
+
+  L.loading = true;
+  L.el.classList.add("busy", "on");
+  L.el.querySelector(".st").textContent = "読込中";
+
+  let ok = 0;
+  for (const src of L.def.sources){
+    try{
+      const ts = await Cesium.Cesium3DTileset.fromUrl(src.url, {
+        maximumScreenSpaceError: +$("#sse").value,
+        cacheBytes: 384 * 1024 * 1024,
+        maximumCacheOverflowBytes: 256 * 1024 * 1024,
+        dynamicScreenSpaceError: true,
+        preloadWhenHidden: false,
+        skipLevelOfDetail: false,
+        shadows: (L.def.category === "risk")
+          ? Cesium.ShadowMode.DISABLED : Cesium.ShadowMode.ENABLED
+      });
+      ts.__layerId = id;
+      ts.__ward = src.ward;
+      viewer.scene.primitives.add(ts);
+      L.tilesets.push(ts);
+      ok++;
+    }catch(e){
+      console.warn("tileset load failed:", src.url, e);
+    }
+  }
+
+  L.loading = false;
+  L.el.classList.remove("busy");
+  if (!ok){
+    L.on = false; L.failed = true;
+    L.el.classList.remove("on");
+    L.el.classList.add("fail");
+    L.el.querySelector(".st").textContent = "失敗";
+    return;
+  }
+  L.on = true;
+  L.el.querySelector(".st").textContent = "表示";
+  applyStyleTo(L);
+  updateLoadedStatus();
+}
+
+function updateLoadedStatus(){
+  const on = [...LAYERS.values()].filter(L => L.on);
+  const bytes = on.reduce((a, L) => a + L.def.bytes, 0);
+  setStatus("data", on.length ? "ok" : "idle",
+    "表示中 <b>" + on.length + "</b> レイヤー（" + fmtBytes(bytes) + " 相当）");
+}
+
+/* --------------------------------------------------------- 色分けスタイル */
+function buildColorModeUI(){
+  // データに存在する属性のモードだけを出す
+  const avail = {
+    texture: CATALOG.textured !== false, mono: true,
+    height: !!PROPS.height, usage: !!PROPS.usage,
+    storeys: !!PROPS.storeys, zone: !!PROPS.zone
+  };
+  const modes = [
+    ["texture", "テクスチャ"], ["mono", "単色"], ["height", "高さ"],
+    ["usage", "用途"], ["storeys", "階数"], ["zone", "用途地域"]
+  ].filter(([id]) => avail[id]);
+  if ((CATALOG.floodDepthProperties || []).length) modes.push(["flood", "浸水深"]);
+  const box = $("#colorModes");
+  box.innerHTML = "";
+  for (const [id, label] of modes){
+    const b = document.createElement("button");
+    b.className = "chip" + (id === colorMode ? " on" : "");
+    b.textContent = label;
+    b.dataset.mode = id;
+    b.onclick = () => setColorMode(id);
+    box.appendChild(b);
+  }
+  renderLegend();
+}
+
+function setColorMode(mode){
+  colorMode = mode;
+  [...$("#colorModes").children].forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
+  clearSelection();
+  for (const L of LAYERS.values()) if (L.tilesets.length) applyStyleTo(L);
+  renderLegend();
+}
+
+/* 3D Tiles スタイル式の注意点（実機検証で判明）
+   - `defined()` は CesiumJS の式パーサに存在しない（PARSE ERROR になる）
+   - 属性が無い地物で `${x} >= 10` を評価すると RuntimeError で描画が止まる
+   - `Number(${x})` は欠損時 NaN になり、NaN との比較は false になるので安全
+   - `max(NaN, 2.0)` は NaN。複数属性の最大値を max() で束ねてはいけない
+   したがって数値比較は必ず Number() でくるみ、「最大値」は
+   しきい値の降順 × 属性ごとの条件を並べることで表現する。 */
+const P = (name) => "${feature['" + name + "']}";
+const N = (name) => "Number(" + P(name) + ")";
+
+function floodProps(){
+  return (CATALOG.floodDepthProperties || []).filter(k => k.indexOf("高潮") < 0);
+}
+
+function buildingStyle(){
+  const a = opacity.toFixed(3);
+  const withAlpha = (hex) => "color('" + hex + "', " + a + ")";
+
+  if (colorMode === "texture") return new Cesium.Cesium3DTileStyle({
+    color: "color('#ffffff', " + a + ")" });
+  if (colorMode === "mono") return new Cesium.Cesium3DTileStyle({
+    color: withAlpha("#d9d4cb") });
+
+  const conditions = [];
+  if (colorMode === "height"){
+    const h = N(PROPS.height);
+    for (const [v, c] of HEIGHT_STOPS) conditions.push([h + " >= " + v, withAlpha(c)]);
+  } else if (colorMode === "storeys"){
+    const s = N(PROPS.storeys);
+    for (const [v, c] of STOREY_STOPS) conditions.push([s + " >= " + v, withAlpha(c)]);
+  } else if (colorMode === "usage"){
+    const u = P(PROPS.usage);
+    for (const k in USAGE_COLORS) conditions.push([u + " === '" + k + "'", withAlpha(USAGE_COLORS[k])]);
+  } else if (colorMode === "zone"){
+    const z = P(PROPS.zone);
+    for (const k in ZONE_COLORS) conditions.push([z + " === '" + k + "'", withAlpha(ZONE_COLORS[k])]);
+  } else if (colorMode === "flood"){
+    const props = floodProps();
+    if (!props.length) return new Cesium.Cesium3DTileStyle({ color: withAlpha("#d9d4cb") });
+    // しきい値の降順に並べるので、最初に一致した＝最大の浸水深になる
+    for (const [v, c] of FLOOD_STOPS)
+      for (const p of props) conditions.push([N(p) + " >= " + v, withAlpha(c)]);
+    conditions.push(["true", withAlpha("#8b949c")]);
+  }
+  conditions.push(["true", withAlpha("#6b7480")]);
+  return new Cesium.Cesium3DTileStyle({ color: { conditions } });
+}
+
+function applyStyleTo(L){
+  for (const ts of L.tilesets){
+    try{
+      if (L.def.category === "building"){
+        ts.style = buildingStyle();
+      } else if (L.def.tint){
+        // テクスチャを持たない面（水部・浸水想定など）はレイヤー色で塗る
+        ts.style = new Cesium.Cesium3DTileStyle({
+          color: "color('" + L.def.color + "', " + L.def.tint + ")" });
+      } else {
+        // 道路・植生・都市設備は元のマテリアルをそのまま活かす
+        ts.style = undefined;
+      }
+    }catch(e){ console.warn("style error", L.def.id, e); }
+  }
+}
+
+function renderLegend(){
+  const box = $("#legend");
+  const rows = [];
+  const push = (color, label) => rows.push(
+    '<div class="li"><i style="background:' + color + '"></i>' + label + "</div>");
+
+  if (colorMode === "height")  HEIGHT_STOPS.forEach(([, c, l]) => push(c, l));
+  else if (colorMode === "storeys") STOREY_STOPS.forEach(([, c, l]) => push(c, l));
+  else if (colorMode === "flood"){
+    FLOOD_STOPS.forEach(([, c, l]) => push(c, l));
+    push("#8b949c", "浸水想定なし");
+    rows.push('<div style="color:var(--dim2);margin-top:5px">' +
+      '河川洪水 L2（想定最大規模）の最大浸水深</div>');
+  }
+  else if (colorMode === "usage") for (const k in USAGE_COLORS) push(USAGE_COLORS[k], k);
+  else if (colorMode === "zone")  for (const k in ZONE_COLORS)  push(ZONE_COLORS[k], k);
+
+  box.innerHTML = rows.join("");
+  box.classList.toggle("show", rows.length > 0);
+}
+
+/* ------------------------------------------------------------ 属性の表示 */
+const HIDDEN_PROPS = new Set(["attributes", "_x", "_y", "_xmin", "_xmax", "_ymin",
+  "_ymax", "_zmin", "_zmax", "_lod", "_lod_type", "feature_type"]);
+
+function installPicking(){
+  const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+  handler.setInputAction((movement) => {
+    const picked = viewer.scene.pick(movement.position);
+    clearSelection();
+    if (!Cesium.defined(picked) || !(picked instanceof Cesium.Cesium3DTileFeature)){
+      $("#info").classList.remove("show");
+      return;
+    }
+    selected = { feature: picked, original: Cesium.Color.clone(picked.color) };
+    picked.color = Cesium.Color.fromCssColorString("#ffd75e").withAlpha(
+      Math.max(0.75, opacity));
+    showAllProps = false;
+    renderInfo(picked);
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+}
+function clearSelection(){
+  if (selected && selected.feature){
+    try{ selected.feature.color = selected.original; }catch(_e){}
+  }
+  selected = null;
+}
+
+function renderInfo(f){
+  const ids = f.getPropertyIds();
+  const get = (k) => { try{ return f.getProperty(k); }catch(_e){ return undefined; } };
+  const val = (v, unit) => {
+    if (v === null || v === undefined || v === "") return null;
+    if (typeof v === "number") {
+      const s = Number.isInteger(v) ? String(v) : v.toFixed(v < 10 ? 2 : 1);
+      return unit ? s + " " + unit : s;
+    }
+    const s = String(v).trim();
+    if (!s) return null;
+    return unit ? s + " " + unit : s;
+  };
+
+  const title = (PROPS.name && val(get(PROPS.name)))
+             || val(get("uro:BuildingIDAttribute_uro:buildingID"))
+             || val(get("gml_id")) || "(名称なし)";
+  $("#infoTitle").textContent = title;
+  $("#infoTag").textContent = [val(get("city_name")),
+    PROPS.usage ? val(get(PROPS.usage)) : null,
+    val(get("feature_type"))].filter(Boolean).join(" · ");
+
+  const rows = [];
+  const used = new Set();
+  for (const [key, label, unit] of (CATALOG.infoProps || DEFAULT_INFO_PROPS)){
+    const v = val(get(key), unit);
+    used.add(key);
+    if (v === null) continue;
+    rows.push("<dl class='kv'><dt>" + label + "</dt><dd>" + esc(v) + "</dd></dl>");
+  }
+  // 浸水深はまとめて表示
+  const floods = ids.filter(k => k.endsWith("_浸水深"));
+  for (const k of floods){
+    used.add(k);
+    const v = val(get(k), "m");
+    if (v === null) continue;
+    const name = k.replace(/_L[12]（[^）]*）_浸水深$/, "").replace(/_浸水深$/, "");
+    const scale = /_L1（/.test(k) ? "L1" : (/_L2（/.test(k) ? "L2" : "");
+    rows.push("<dl class='kv'><dt>" + esc(name) + (scale ? " " + scale : "") +
+      "</dt><dd>浸水深 " + esc(v) + "</dd></dl>");
+  }
+
+  if (showAllProps){
+    for (const k of ids){
+      if (used.has(k) || HIDDEN_PROPS.has(k) || k.endsWith("コード")) continue;
+      const v = val(get(k));
+      if (v === null) continue;
+      rows.push("<dl class='kv'><dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd></dl>");
+    }
+  }
+
+  $("#infoBody").innerHTML = rows.join("") ||
+    '<div class="status" style="padding:10px 0">属性情報がありません</div>';
+  $("#infoMore").textContent = showAllProps ? "主要な属性のみ表示" : "全属性を表示";
+  $("#info").classList.add("show");
+}
+function esc(s){
+  return String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+}
+
+/* ---------------------------------------------------------------- 日照/影 */
+function todayLocal(){
+  const n = new Date();
+  return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0")
+       + "-" + String(n.getDate()).padStart(2, "0");
+}
+function applySun(){
+  const d = $("#sunDate").value || todayLocal();
+  const mins = +$("#sunTime").value;
+  const hh = String(Math.floor(mins / 60)).padStart(2, "0");
+  const mm = String(mins % 60).padStart(2, "0");
+  $("#sunTimeVal").textContent = hh + ":" + mm;
+  try{
+    viewer.clock.currentTime = Cesium.JulianDate.fromIso8601(d + "T" + hh + ":" + mm + ":00+09:00");
+  }catch(_e){}
+}
+function setShadows(on){
+  $("#shadowOn").classList.toggle("on", on);
+  $("#shadowOff").classList.toggle("on", !on);
+  viewer.shadows = on;
+  viewer.scene.globe.enableLighting = on;
+  setStatus("sun", on ? "ok" : "idle", on ? "影：オン（太陽位置連動）" : "影：オフ");
+}
+
+/* -------------------------------------------------------------- 表示切替 */
+function setImagery(kind){
+  document.querySelectorAll("[data-img]").forEach(b => b.classList.toggle("on", b.dataset.img === kind));
+  if (imageryLayer){ viewer.imageryLayers.remove(imageryLayer, true); imageryLayer = null; }
+  if (kind === "none"){ setStatus("imagery", "idle", "背景：なし"); return; }
+  const map = {
+    photo: [CONFIG.gsi.photo, 18, "地理院 シームレス空中写真", "航空写真"],
+    pale:  [CONFIG.gsi.pale,  18, "地理院タイル（淡色地図）", "淡色地図"],
+    std:   [CONFIG.gsi.std,   18, "地理院タイル（標準地図）", "標準地図"]
+  }[kind];
+  imageryLayer = viewer.imageryLayers.addImageryProvider(
+    new Cesium.UrlTemplateImageryProvider({ url: map[0], maximumLevel: map[1], credit: map[2] }));
+  viewer.imageryLayers.lowerToBottom(imageryLayer);
+  setStatus("imagery", "ok", "背景：" + map[3]);
+}
+function setTerrain(on){
+  $("#terrainOn").classList.toggle("on", on);
+  $("#terrainOff").classList.toggle("on", !on);
+  viewer.scene.terrainProvider = on ? terrainProvider : new Cesium.EllipsoidTerrainProvider();
+  setStatus("terrain", on ? "ok" : "idle", on ? "地形：地理院 標高タイル" : "地形：平面（楕円体）");
+}
+function flyBookmark(bm, duration){
+  const center = Cesium.Cartesian3.fromDegrees(bm.lon, bm.lat, CONFIG.geoidOffset);
+  viewer.camera.flyToBoundingSphere(new Cesium.BoundingSphere(center, 1.0), {
+    offset: new Cesium.HeadingPitchRange(
+      Cesium.Math.toRadians(bm.heading), Cesium.Math.toRadians(bm.pitch), bm.range),
+    duration: duration === undefined ? 1.8 : duration
+  });
+}
+function flyToAll(){
+  const b = CATALOG.bounds;
+  if (!b) return;
+  viewer.camera.flyTo({
+    destination: Cesium.Rectangle.fromDegrees(b[0], b[1], b[2], b[3]),
+    duration: 2.0
+  });
+}
+
+/* ----------------------------------------------------------------- UI組立 */
+function buildStaticUI(){
+  const ready = () => !!viewer;
+
+  $("#uiToggle").onclick = () => $("#ui").classList.toggle("collapsed");
+  $("#infoClose").onclick = () => { clearSelection(); $("#info").classList.remove("show"); };
+  $("#infoMore").onclick = () => {
+    showAllProps = !showAllProps;
+    if (selected && selected.feature) renderInfo(selected.feature);
+  };
+
+  document.querySelectorAll("[data-img]").forEach(b => {
+    b.onclick = () => ready() && setImagery(b.dataset.img);
+  });
+  $("#terrainOn").onclick  = () => ready() && setTerrain(true);
+  $("#terrainOff").onclick = () => ready() && setTerrain(false);
+  $("#shadowOn").onclick   = () => ready() && setShadows(true);
+  $("#shadowOff").onclick  = () => ready() && setShadows(false);
+
+  $("#sunDate").value = todayLocal();
+  $("#sunDate").onchange = () => ready() && applySun();
+  $("#sunTime").oninput  = () => ready() && applySun();
+
+  $("#opacity").oninput = (e) => {
+    opacity = +e.target.value / 100;
+    $("#opacityVal").textContent = e.target.value + "%";
+    if (!ready()) return;
+    for (const L of LAYERS.values()) if (L.tilesets.length) applyStyleTo(L);
+  };
+  $("#exag").oninput = (e) => {
+    const v = +e.target.value;
+    $("#exagVal").textContent = v.toFixed(1) + "×";
+    if (ready() && "verticalExaggeration" in viewer.scene) viewer.scene.verticalExaggeration = v;
+  };
+  $("#geoid").oninput = (e) => {
+    const v = +e.target.value;
+    $("#geoidVal").textContent = v.toFixed(1) + " m";
+    CONFIG.geoidOffset = v;
+  };
+  $("#geoid").onchange = () => {
+    if (!ready()) return;
+    // 地形タイルを作り直して新しいジオイド補正を反映させる
+    terrainProvider = createGsiTerrainProvider(Cesium);
+    if ($("#terrainOn").classList.contains("on")) viewer.scene.terrainProvider = terrainProvider;
+  };
+  $("#sse").oninput = (e) => {
+    const v = +e.target.value;
+    $("#sseVal").textContent = v <= 8 ? "高精細" : (v <= 20 ? "標準" : "軽量");
+    if (!ready()) return;
+    for (const L of LAYERS.values()) for (const ts of L.tilesets) ts.maximumScreenSpaceError = v;
+  };
+
+  const box = $("#bookmarks");
+  const all = document.createElement("button");
+  all.className = "bm";
+  all.innerHTML = "データ全域<small>読み込んだ市区の全体を俯瞰</small>";
+  all.onclick = () => ready() && flyToAll();
+  box.appendChild(all);
+  BOOKMARKS.forEach((bm) => {
+    const b = document.createElement("button");
+    b.className = "bm";
+    b.innerHTML = esc(bm.name) + "<small>" + esc(bm.note) + "</small>";
+    b.onclick = () => ready() && flyBookmark(bm);
+    box.appendChild(b);
+  });
+
+  setStatus("cesium", "warn", "CesiumJS を読み込み中…");
+}
+
+/* -------------------------------------------------------------------- HUD */
+function startHud(){
+  const cam = viewer.camera;
+  const upd = () => {
+    const carto = Cesium.Cartographic.fromCartesian(cam.positionWC);
+    if (carto){
+      const h = carto.height;
+      $("#hudAlt").textContent = h >= 1000 ? (h / 1000).toFixed(2) + " km" : h.toFixed(0) + " m";
+      $("#hudPos").textContent =
+        Cesium.Math.toDegrees(carto.latitude).toFixed(5) + ", " +
+        Cesium.Math.toDegrees(carto.longitude).toFixed(5);
+    }
+    $("#hudHeading").textContent =
+      ((Cesium.Math.toDegrees(cam.heading) % 360 + 360) % 360).toFixed(0) + "°";
+  };
+  cam.percentageChanged = 0.02;
+  cam.changed.addEventListener(upd);
+
+  let tick = 0;
+  viewer.clock.onTick.addEventListener(() => {
+    if (++tick % 20) return;
+    upd();
+    let pending = 0, ready = 0, mem = 0;
+    for (const L of LAYERS.values()){
+      for (const ts of L.tilesets){
+        if (!ts.show || !ts.statistics) continue;
+        const s = ts.statistics;
+        pending += (s.numberOfPendingRequests || 0) + (s.numberOfTilesProcessing || 0);
+        ready += s.numberOfTilesWithContentReady || 0;
+        mem += (s.geometryByteLength || 0) + (s.texturesByteLength || 0);
+      }
+    }
+    $("#tileStat").innerHTML =
+      "描画中タイル <b>" + ready + "</b>　GPUメモリ <b>" + fmtBytes(mem) + "</b>" +
+      (pending ? "<br><span style='color:var(--warn)'>読込中 " + pending + " …</span>" : "");
+  });
+  upd();
+}
+</script>
+</body>
+</html>
