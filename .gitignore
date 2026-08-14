@@ -19,3 +19,6 @@ __pycache__/
 *.py[cod]
 .DS_Store
 .venv/
+
+# 差し替えで退避した旧タイル
+_old/
