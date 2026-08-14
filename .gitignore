@@ -23,3 +23,6 @@ __pycache__/
 # 差し替えで退避した旧タイル
 _old/
 _x2-*
+
+# Blender書き出し（巨大なのでGitには載せない）
+export/
